@@ -7,7 +7,6 @@
 -->
 <robot name="ebot" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <!-- Differential drive: the left pair and the right pair are each driven together. -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <left_joint>FWLJ</left_joint>
@@ -38,7 +37,7 @@
       <odom_topic>odom</odom_topic>
       <odom_frame>odom</odom_frame>
       <tf_topic>tf</tf_topic>
-      <robot_base_frame>ebot_base_link</robot_base_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
     </plugin>
   </gazebo>
 
@@ -51,20 +50,20 @@
   </gazebo>
 
 
-  <!-- Chassis contact sensor. -->
   <gazebo reference="ebot_base">
     <sensor name='collision_sensor' type='contact'>
-      <contact>
-        <collision>ebot_base_link_fixed_joint_lump__ebot_base_collision</collision>
-        <collision>ebot_base_link_fixed_joint_lump__ebot_base_collision_1</collision>
-      </contact>
+      <always_on>true</always_on>
       <update_rate>5</update_rate>
+      <contact>
+        <collision>base_footprint_fixed_joint_lump__ebot_base_collision</collision>
+        <collision>base_footprint_fixed_joint_lump__ebot_base_collision_1</collision>
+        <topic>/ebot_contact</topic>
+      </contact>
     </sensor>
   </gazebo>
 
 
   <gazebo reference="FWL">
-    <material>Gazebo/Black</material>
     <collision>
     <surface>
       <friction>
@@ -78,7 +77,6 @@
   </gazebo>
 
   <gazebo reference="FWR">
-    <material>Gazebo/Black</material>
     <collision>
     <surface>
       <friction>
@@ -92,7 +90,6 @@
   </gazebo>
 
   <gazebo reference="RWL">
-    <material>Gazebo/Black</material>
     <collision>
     <surface>
       <friction>
@@ -106,7 +103,6 @@
   </gazebo>
 
   <gazebo reference="RWR">
-    <material>Gazebo/Black</material>
     <collision>
     <surface>
       <friction>
@@ -119,16 +115,8 @@
   </collision>
   </gazebo>
 
-  <gazebo reference="laser">
-    <material>Gazebo/Black</material>
-  </gazebo>
-
-  <gazebo reference="camera_link">
-    <material>Gazebo/Black</material>
-  </gazebo>
 
 
-  <!-- 2D LiDAR -->
   <gazebo reference="laser">
     <sensor name="laser" type="gpu_lidar">
       <always_on>true</always_on>
@@ -167,16 +155,16 @@
     </sensor>
   </gazebo>
 
-  <!-- Ultrasonic range sensor -->
   <xacro:macro name="ultrasonic_sensor" params="name">
     <gazebo reference="${name}">
       <sensor name="${name}" type="gpu_lidar">
+        <gz_frame_id>${name}</gz_frame_id>
         <always_on>1</always_on>
         <update_rate>5</update_rate>
         <visualize>0</visualize>
-        <topic>${name}/data</topic>
+        <topic>${name}</topic>
         <pose>0 0 0 0 0 0</pose>
-        <ray>
+        <lidar>
           <scan>
             <horizontal>
               <samples>5</samples>
@@ -201,7 +189,7 @@
             <mean>0.0</mean>
             <stddev>0.01</stddev>
           </noise>
-        </ray>
+        </lidar>
       </sensor>
     </gazebo>
   </xacro:macro>

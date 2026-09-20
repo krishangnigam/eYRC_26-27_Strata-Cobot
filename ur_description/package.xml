@@ -16,7 +16,6 @@
 
   <url type="repository">https://github.com/UniversalRobots/Universal_Robots_ROS2_Description</url>
 
-  <!-- Upstream authors, retained for attribution under BSD-3-Clause. -->
   <author>Nadia Hammoudeh Garcia</author>
   <author>Kelsey Hawkins</author>
   <author>G.A. vd. Hoorn</author>
@@ -34,26 +33,16 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- Linked by the prebuilt binaries in bin/ and lib/. Nothing here is compiled. -->
   <exec_depend>ament_index_cpp</exec_depend>
-  <!-- rosdep KEYS, not apt package names. "assimp" is the key that resolves to the
-       libassimp-dev package; "libassimp-dev" is not a key at all, and having it here
-       made `rosdep install` over this workspace fail outright with "Cannot locate
-       rosdep definition for [libassimp-dev]". That is the command every ROS tutorial
-       tells you to run. "libfcl-dev" happens to be both a key and a package name. -->
   <exec_depend>assimp</exec_depend>
   <exec_depend>libfcl-dev</exec_depend>
-  <!-- cartesian_servo links libcrypto.so.3: it seals its full diagnostics onto the
-       hidden topic /_arm_detail rather than publishing all of them in the clear. The
-       "openssl" key resolves to the apt package of the same name, which Depends on
-       libssl3t64, so this does pull the runtime library in, indirectly.
-       requirements.sh names libssl3t64 directly. -->
   <exec_depend>openssl</exec_depend>
   <exec_depend>kdl_parser</exec_depend>
   <exec_depend>orocos_kdl_vendor</exec_depend>
   <exec_depend>rclcpp</exec_depend>
   <exec_depend>urdf</exec_depend>
   <exec_depend>gz_sim_vendor</exec_depend>
+  <exec_depend>depth_image_proc</exec_depend>
 
   <exec_depend>eyantra_kepler_colony</exec_depend>
   <exec_depend>launch</exec_depend>

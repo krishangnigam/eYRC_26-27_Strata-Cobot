@@ -22,6 +22,8 @@ def generate_launch_description():
 
     spawn_x, spawn_y, spawn_z, spawn_yaw = '0.0', '0.0', '0.3862', '0'
 
+    floor_top_z = '0.3312'
+
     xacro_file = os.path.join(pkg_ebot_share, 'models', 'ebot', 'ebot_description.xacro')
     robot_desc = xacro.process_file(xacro_file, mappings={'prefix': 'ebot_'}).toxml()
 
@@ -62,9 +64,8 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
         arguments=[
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-            '/ultrasonic_rl/data@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/ultrasonic_rr/data@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/ultrasonic_rl@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/ultrasonic_rr@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
             '/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
@@ -79,8 +80,8 @@ def generate_launch_description():
         output='screen',
         parameters=[{'use_sim_time': True}],
         arguments=[
-            '--x', '0', '--y', '0', '--z', '0',
-            '--roll', '0', '--pitch', '0', '--yaw', '0',
+            '--x', spawn_x, '--y', spawn_y, '--z', floor_top_z,
+            '--roll', '0', '--pitch', '0', '--yaw', spawn_yaw,
             '--frame-id', 'world',
             '--child-frame-id', 'odom',
         ],

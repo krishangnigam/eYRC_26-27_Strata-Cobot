@@ -18,7 +18,6 @@ from launch.substitutions import (
     FindExecutable,
     LaunchConfiguration,
     PathJoinSubstitution,
-    PythonExpression,
 )
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -40,11 +39,10 @@ def generate_launch_description():
 
         DeclareLaunchArgument("x", default_value="-0.597278"),
         DeclareLaunchArgument("y", default_value="1.8653"),
-        DeclareLaunchArgument("z", default_value="0.7887"),
+        DeclareLaunchArgument("z", default_value="0.8825"),
         DeclareLaunchArgument("roll", default_value="0.0"),
         DeclareLaunchArgument("pitch", default_value="0.0"),
-        DeclareLaunchArgument("yaw", default_value="3.1415927"),
-        DeclareLaunchArgument("world_z", default_value="0.3862"),
+        DeclareLaunchArgument("yaw", default_value="0.0"),
         DeclareLaunchArgument(
             "launch_rviz",
             default_value="false",
@@ -73,6 +71,12 @@ def generate_launch_description():
                 " ", "ur_type:=", ur_type,
                 " ", "tf_prefix:=", tf_prefix,
                 " ", "force_abs_paths:=true",
+                " ", "mount_x:=", LaunchConfiguration("x"),
+                " ", "mount_y:=", LaunchConfiguration("y"),
+                " ", "mount_z:=", LaunchConfiguration("z"),
+                " ", "mount_roll:=", LaunchConfiguration("roll"),
+                " ", "mount_pitch:=", LaunchConfiguration("pitch"),
+                " ", "mount_yaw:=", LaunchConfiguration("yaw"),
                 " ", "simulation_controllers:=", controllers_file,
             ]),
             value_type=str,
@@ -86,31 +90,15 @@ def generate_launch_description():
         output="screen",
     )
 
-    world_to_arm_mount = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="world_to_arm_mount",
-        arguments=[
-            "--x", LaunchConfiguration("x"),
-            "--y", LaunchConfiguration("y"),
-            "--z", PythonExpression(
-                ["str(", LaunchConfiguration("z"), " - ",
-                 LaunchConfiguration("world_z"), ")"]),
-            "--roll", LaunchConfiguration("roll"),
-            "--pitch", LaunchConfiguration("pitch"),
-            "--yaw", LaunchConfiguration("yaw"),
-            "--frame-id", "world",
-            "--child-frame-id", "arm_mount",
-        ],
-        parameters=[{"use_sim_time": True}],
-        output="screen",
-    )
-
     flange_to_end_effector = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         name="flange_to_end_effector",
-        arguments=["--frame-id", "flange", "--child-frame-id", "end_effector"],
+        arguments=[
+            "--x", "0", "--y", "0", "--z", "0",
+            "--roll", "0", "--pitch", "0", "--yaw", "0",
+            "--frame-id", "flange", "--child-frame-id", "end_effector",
+        ],
         parameters=[{"use_sim_time": True}],
         output="screen",
     )
@@ -121,12 +109,6 @@ def generate_launch_description():
         arguments=[
             "-topic", "robot_description",
             "-name", name,
-            "-x", LaunchConfiguration("x"),
-            "-y", LaunchConfiguration("y"),
-            "-z", LaunchConfiguration("z"),
-            "-R", LaunchConfiguration("roll"),
-            "-P", LaunchConfiguration("pitch"),
-            "-Y", LaunchConfiguration("yaw"),
         ],
         parameters=[{"use_sim_time": True}],
         output="screen",
@@ -150,6 +132,20 @@ def generate_launch_description():
     camera_bridge = gz_bridge("ur_camera_bridge", "gz_bridge_camera.yaml")
     camera_depth_bridge = gz_bridge(
         "ur_camera_depth_bridge", "gz_bridge_camera_depth.yaml")
+    camera_points = Node(
+        package="depth_image_proc",
+        executable="point_cloud_xyzrgb_node",
+        name="ur_camera_points",
+        parameters=[{"use_sim_time": True}],
+        remappings=[
+            ("depth_registered/image_rect",
+             "/camera/camera/aligned_depth_to_color/image_raw"),
+            ("rgb/image_rect_color", "/camera/camera/color/image_raw"),
+            ("rgb/camera_info", "/camera/camera/color/camera_info"),
+            ("points", "/camera/camera/depth/color/points"),
+        ],
+        output="screen",
+    )
 
     rviz = Node(
         package="rviz2",
@@ -185,10 +181,10 @@ def generate_launch_description():
 
     forward_position_controller_spawner = spawner("forward_position_controller")
 
-    cartesian_servo = Node(
+    ur_arm_controller = Node(
         package="ur_description",
-        executable="cartesian_servo",
-        name="cartesian_servo_node",
+        executable="ur_arm_controller",
+        name="ur_arm_controller",
         parameters=[{"use_sim_time": True}],
         output="screen",
     )
@@ -197,12 +193,12 @@ def generate_launch_description():
         declared_arguments
         + [
             robot_state_publisher,
-            world_to_arm_mount,
             flange_to_end_effector,
             spawn_entity,
             bridge,
             camera_bridge,
             camera_depth_bridge,
+            camera_points,
             rviz,
             RegisterEventHandler(
                 OnProcessExit(
@@ -219,7 +215,7 @@ def generate_launch_description():
             RegisterEventHandler(
                 OnProcessExit(
                     target_action=forward_position_controller_spawner,
-                    on_exit=[cartesian_servo],
+                    on_exit=[ur_arm_controller],
                 )
             ),
         ]

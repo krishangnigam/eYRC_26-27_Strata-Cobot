@@ -2,7 +2,8 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:include filename="$(find ur_description)/urdf/ur_joint_control.xacro" />
 
-  <xacro:macro name="ur_gz_ros2_control" params="
+  <xacro:macro name="ur_gz_ros2_control"
+    params="
     name
     tf_prefix
     simulation_controllers

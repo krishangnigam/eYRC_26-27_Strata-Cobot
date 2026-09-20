@@ -1,5 +1,3 @@
-# Visualisation
-
 mesh_files:
   base:
     visual:
@@ -16,7 +14,7 @@ mesh_files:
       z: 0.0
       roll: 0.0
       pitch: 0.0
-      yaw: !degrees 180
+      yaw: !degrees 0
 
   shoulder:
     visual:

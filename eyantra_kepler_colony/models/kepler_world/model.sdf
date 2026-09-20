@@ -1,10 +1,7 @@
 <?xml version="1.0"?>
 <sdf version="1.9">
-  <!-- The arena: floor, boundary walls, terrain backdrop, scenery, ore crusher and
-       cargo rover. -->
   <model name="kepler_world">
 
-    <!-- Terrain backdrop: -->
     <link name="arena_link">
       <inertial>
         <mass>50.0</mass>
@@ -31,7 +28,6 @@
       <child>arena_link</child>
     </joint>
 
-    <!-- terrain. -->
     <link name="terrain_link">
       <pose>-0.5 -2.8 0 1.57079 0.0 0.0</pose>
       <inertial>
@@ -49,7 +45,6 @@
       <child>terrain_link</child>
     </joint>
 
-    <!-- Ore crusher -->
     <link name="ore_crusher_link">
       <pose>-1.4008 1.68445 0.613942 1.57079 0.0 0.0</pose>
       <inertial>
@@ -77,7 +72,6 @@
       <child>ore_crusher_link</child>
     </joint>
 
-    <!-- Cargo rover -->
     <link name="cargo_rover_link">
       <pose>-1.03719 2.5537 0.568798 1.57079 0.0 0.0</pose>
       <inertial>
@@ -100,7 +94,6 @@
       <child>cargo_rover_link</child>
     </joint>
 
-    <!-- Floor -->
     <link name="floor_link">
       <pose>2.5646 1.8653 0.3062 0.0 0.0 1.5707</pose>
       <inertial>
@@ -132,7 +125,6 @@
       <child>floor_link</child>
     </joint>
 
-    <!-- Arena Structure -->
     <link name="arena_structure_link">
 
       <inertial>

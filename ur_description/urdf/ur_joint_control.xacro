@@ -1,14 +1,15 @@
 <?xml version="1.0"?>
 
 <robot xmlns:xacro="http://wiki.ros.org/xacro">
-  <xacro:macro name="ur_joint_control_description" params="
+  <xacro:macro name="ur_joint_control_description"
+    params="
     tf_prefix
     initial_positions:=${dict(shoulder_pan_joint=0.0,shoulder_lift_joint=-1.57,elbow_joint=0.0,wrist_1_joint=-1.57,wrist_2_joint=0.0,wrist_3_joint=0.0)}
     ">
     <joint name="${tf_prefix}shoulder_pan_joint">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
+      <command_interface name="position" />
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
       <state_interface name="position">
 
         <param name="initial_value">${initial_positions['shoulder_pan_joint']}</param>
@@ -21,9 +22,9 @@
       </state_interface>
     </joint>
     <joint name="${tf_prefix}shoulder_lift_joint">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
+      <command_interface name="position" />
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
       <state_interface name="position">
 
         <param name="initial_value">${initial_positions['shoulder_lift_joint']}</param>
@@ -36,9 +37,9 @@
       </state_interface>
     </joint>
     <joint name="${tf_prefix}elbow_joint">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
+      <command_interface name="position" />
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
       <state_interface name="position">
 
         <param name="initial_value">${initial_positions['elbow_joint']}</param>
@@ -51,9 +52,9 @@
       </state_interface>
     </joint>
     <joint name="${tf_prefix}wrist_1_joint">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
+      <command_interface name="position" />
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
       <state_interface name="position">
 
         <param name="initial_value">${initial_positions['wrist_1_joint']}</param>
@@ -66,9 +67,9 @@
       </state_interface>
     </joint>
     <joint name="${tf_prefix}wrist_2_joint">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
+      <command_interface name="position" />
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
       <state_interface name="position">
 
         <param name="initial_value">${initial_positions['wrist_2_joint']}</param>
@@ -81,9 +82,9 @@
       </state_interface>
     </joint>
     <joint name="${tf_prefix}wrist_3_joint">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
+      <command_interface name="position" />
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
       <state_interface name="position">
 
         <param name="initial_value">${initial_positions['wrist_3_joint']}</param>

@@ -1,5 +1,9 @@
-.vscode/
+# What not to commit in your workspace.
+#
+# This file ships with the task. Add your own rules at the bottom; do not remove what is
+# already here, or you will end up committing several hundred megabytes of build output.
 
+# colcon writes these three. They are rebuilt by `colcon build` and never belong in git.
 build/
 install/
 log/
@@ -8,3 +12,14 @@ log/
 __pycache__/
 *.py[cod]
 
+# Editors and tooling
+.vscode/
+.idea/
+*.swp
+
+# What the evaluator writes: your run's report, and the folder it goes in. Upload the
+# result.zip as the task page describes -- do not commit it.
+result-SC-*
+SC-*-task-*/
+
+.DS_Store

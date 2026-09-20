@@ -1,8 +1,5 @@
-# Physical parameters
-
-
 inertia_parameters:
-  base_mass: 4.0  # This mass might be incorrect
+  base_mass: 4.0
   shoulder_mass: 3.761
   upper_arm_mass: 8.058
   forearm_mass: 2.846
@@ -15,32 +12,31 @@ inertia_parameters:
       radius: 0.06
       length: 0.05
 
-  # model referring to https://www.universal-robots.com/articles/ur/application-installation/dh-parameters-for-calculations-of-kinematics-and-dynamics/
   center_of_mass:
     shoulder_cog:
-      x: 0.0        # model.x
-      y: -0.00193   # -model.z
-      z: -0.02561   # model.y
+      x: 0.0
+      y: -0.00193
+      z: -0.02561
     upper_arm_cog:
-      x: -0.2125    # model.x - upper_arm_length
-      y: 0.0        # model.y
-      z: 0.11336    # model.z
+      x: -0.2125
+      y: 0.0
+      z: 0.11336
     forearm_cog:
-      x: -0.2422    # model.x - forearm_length
-      y: 0.0        # model.y
-      z: 0.0265     # model.z
+      x: -0.2422
+      y: 0.0
+      z: 0.0265
     wrist_1_cog:
-      x: 0.0        # model.x
-      y: -0.01634   # -model.z
-      z: -0.0018    # model.y
+      x: 0.0
+      y: -0.01634
+      z: -0.0018
     wrist_2_cog:
-      x: 0.0        # model.x
-      y: 0.01634    # model.z
-      z: -0.0018    # -model.y
+      x: 0.0
+      y: 0.01634
+      z: -0.0018
     wrist_3_cog:
-      x: 0.0        # model.x
-      y: 0.0        # model.y
-      z: -0.001159  # model.z
+      x: 0.0
+      y: 0.0
+      z: -0.001159
 
   rotation:
     shoulder:

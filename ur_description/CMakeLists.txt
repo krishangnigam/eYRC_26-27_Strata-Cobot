@@ -7,9 +7,11 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 
-install(PROGRAMS bin/cartesian_servo DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS bin/ur_arm_controller DESTINATION lib/${PROJECT_NAME})
 
-install(PROGRAMS lib/libmagnet_system.so DESTINATION lib)
+install(PROGRAMS
+  lib/libmagnet_system.so
+  DESTINATION lib)
 ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/${PROJECT_NAME}.dsv.in")
 
 install(

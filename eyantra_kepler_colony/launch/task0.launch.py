@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-Task 0 bringup: load the kepler world, then spawn the UR7e arm and the eBot.
+Task 0 bringup: load the mining arena world, then spawn the UR7e arm and the eBot.
 
-Run `ros2 launch eyantra_kepler_colony task0.launch.py`.
+    ros2 launch eyantra_kepler_colony task0.launch.py
+    ros2 launch eyantra_kepler_colony task0.launch.py gui:=false     # headless
+    ros2 launch eyantra_kepler_colony task0.launch.py arm:=false     # world + eBot only
+    ros2 launch eyantra_kepler_colony task0.launch.py ebot:=false    # world + arm only
+    ros2 launch eyantra_kepler_colony task0.launch.py objects:=false # no ores or rocks
+
+Run `ros2 launch eyantra_kepler_colony task0.launch.py --show-args` for every argument.
 '''
 
+import os
+import tempfile
+
+import xacro
 from launch import LaunchDescription
 from launch.actions import (
     AppendEnvironmentVariable,
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     TimerAction,
 )
 from launch.conditions import IfCondition
@@ -31,9 +42,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "world_file",
             default_value=PathJoinSubstitution(
-                [pkg_share, "worlds", "eyantra_kepler_world.world"]
+                [pkg_share, "worlds", "eyantra_kepler_world.world.xacro"]
             ),
-            description="Absolute path of the SDF world to load.",
+            description="Absolute path of the SDF world to load. A \".xacro\" "
+                        "path is expanded at launch time; see below for the one "
+                        "mapping this file passes.",
         ),
         DeclareLaunchArgument(
             "gui",
@@ -56,6 +69,11 @@ def generate_launch_description():
             description="Spawn the eBot.",
         ),
         DeclareLaunchArgument(
+            "objects",
+            default_value="true",
+            description="Spawn the ore samples, the ore package and the world rocks.",
+        ),
+        DeclareLaunchArgument(
             "arm_delay", default_value="5.0", description="Delay before the arm spawns."
         ),
         DeclareLaunchArgument(
@@ -68,7 +86,6 @@ def generate_launch_description():
         ),
     ]
 
-    world_file = LaunchConfiguration("world_file")
     verbosity = LaunchConfiguration("verbosity")
 
     server_only_flag = PythonExpression(
@@ -88,17 +105,38 @@ def generate_launch_description():
         ),
     ]
 
-    gz_sim = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution(
-                [FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"]
+    def _launch_gz_sim(context, *_args, **_kwargs):
+        world_path = LaunchConfiguration("world_file").perform(context)
+
+        if world_path.endswith(".xacro"):
+            expanded_sdf = xacro.process_file(
+                world_path, mappings={"plugin_enabled": "false"}
+            ).toxml()
+            fd, resolved_world_path = tempfile.mkstemp(
+                prefix="eyantra_kepler_world_", suffix=".world"
             )
-        ),
-        launch_arguments={
-            "gz_args": [server_only_flag, "-r -v ", verbosity, " ", world_file],
-            "on_exit_shutdown": "true",
-        }.items(),
-    )
+            with os.fdopen(fd, "w") as f:
+                f.write(expanded_sdf)
+        else:
+            resolved_world_path = world_path
+
+        return [
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    PathJoinSubstitution(
+                        [FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"]
+                    )
+                ),
+                launch_arguments={
+                    "gz_args": [
+                        server_only_flag, "-r -v ", verbosity, " ", resolved_world_path,
+                    ],
+                    "on_exit_shutdown": "true",
+                }.items(),
+            )
+        ]
+
+    gz_sim = OpaqueFunction(function=_launch_gz_sim)
 
     arm = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -124,6 +162,7 @@ def generate_launch_description():
                 [pkg_share, "launch", "spawn_objects.launch.py"]
             )
         ),
+        condition=IfCondition(LaunchConfiguration("objects")),
     )
 
     clock_bridge = Node(

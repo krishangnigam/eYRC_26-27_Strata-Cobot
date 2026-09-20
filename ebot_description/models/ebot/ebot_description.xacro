@@ -26,15 +26,15 @@
       izz="${c_mass*(3*r*r+l*l)/12}" />
   </xacro:macro>
 
-  <link name="ebot_base_link"></link>
+  <link name="base_footprint"></link>
 
   <joint name="base_footprint_joint" type="fixed">
-    <parent link="ebot_base_link" />
-    <child link="base_footprint" />
-    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="base_footprint" />
+    <child link="ebot_base_link" />
+    <origin xyz="0.0 0.0 0.055" rpy="0.0 0.0 0.0" />
   </joint>
-  
-  <link name="base_footprint"></link>
+
+  <link name="ebot_base_link"></link>
   
   <joint name="base_link_ebot_base_joint" type="fixed">
     <parent link="ebot_base_link" />
@@ -81,7 +81,6 @@
     <xacro:cylinder_inertia c_mass="${wheel_mass}" r="0.1" l="0.05" />
   </xacro:property>
 
-  <!-- Front wheel, right -->
 <link
     name="FWR">
     <inertial>
@@ -134,7 +133,6 @@
       xyz="0 -1 0" />
   </joint>
   
-  <!-- Front wheel, left -->
   <link
     name="FWL">
     <inertial>
@@ -179,7 +177,6 @@
     <axis
       xyz="0 1 0" />
   </joint>
- <!-- Rear wheel, right -->
   <link
     name="RWR">
     <inertial>
@@ -225,7 +222,6 @@
       xyz="0 -1 0" />
   </joint>
 
-  <!-- Rear wheel, left -->
   <link
     name="RWL">
     <inertial>
@@ -271,7 +267,6 @@
       xyz="0 1 0" />
   </joint>
   
-  <!-- LIDAR -->
   <link name="laser">
     <origin rpy="0 0 0" xyz="0 0 0" />
     <visual>
@@ -293,7 +288,6 @@
     <axis rpy="0 0 0" xyz="0.02 0 0.178" />
     <joint_properties damping="5.0" friction="1.0" />
   </joint>
- <!-- Front housing 1 (visual only) -->
   <link
     name="FUS1">
     <visual>
@@ -324,7 +318,6 @@
     <axis
       xyz="0 0 0" />
   </joint>
- <!-- Front housing 2 (visual only) -->
   <link
     name="FUS2">
     <visual>
@@ -356,7 +349,6 @@
       xyz="0 0 0" />
   </joint>
 
-  <!-- Front housing 3 (visual only) -->
   <link
     name="FUS3">
     <visual>
@@ -389,7 +381,6 @@
   </joint>
 
 
-  <!-- Front housing 4 (visual only) -->
   <link
     name="FUS4">
     <visual>
@@ -421,7 +412,6 @@
       xyz="0 0 0" />
   </joint>
 
-  <!-- Rear left: sensor on /ultrasonic_rl/data -->
   <link
     name="ultrasonic_rl">
     <visual>
@@ -453,7 +443,6 @@
       xyz="0 0 0" />
   </joint>
 
-  <!-- Rear right: sensor on /ultrasonic_rr/data -->
   <link
     name="ultrasonic_rr">
     <visual>
@@ -486,7 +475,6 @@
   </joint>
 
 
-  <!-- Right housing, front (visual only) -->
   <link
     name="RHUS7">
     <visual>
@@ -518,7 +506,6 @@
       xyz="0 0 0" />
   </joint>
 
-  <!-- Right housing, rear (visual only) -->
   <link
     name="RHUS9">
     <visual>
@@ -550,7 +537,6 @@
       xyz="0 0 0" />
   </joint>
 
-  <!-- Left housing, rear (visual only) -->
   <link
     name="LHUS9">
     <visual>
@@ -582,7 +568,6 @@
       xyz="0 0 0" />
   </joint>
 
-  <!-- Left housing, front (visual only) -->
   <link
     name="LHUS10">
     <visual>
@@ -613,7 +598,6 @@
     <axis
       xyz="0 0 0" />
   </joint>
-  <!-- IMU -->
   <link name="imu_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />

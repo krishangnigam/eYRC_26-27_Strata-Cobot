@@ -1,13 +1,5 @@
-# Gazebo <-> ROS topic bridges for the arm's sensors.
-
 - ros_topic_name: "/end_effector_wrench"
   gz_topic_name: "/end_effector_wrench"
   ros_type_name: "geometry_msgs/msg/WrenchStamped"
   gz_type_name: "gz.msgs.Wrench"
-  direction: GZ_TO_ROS
-
-- ros_topic_name: "/arm_contact"
-  gz_topic_name: "/arm_contact"
-  ros_type_name: "ros_gz_interfaces/msg/Contacts"
-  gz_type_name: "gz.msgs.Contacts"
   direction: GZ_TO_ROS

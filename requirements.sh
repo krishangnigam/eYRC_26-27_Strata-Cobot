@@ -21,6 +21,7 @@ ROS_PACKAGES_ADDED=(
   ros-jazzy-controller-manager-msgs
   ros-jazzy-tf-transformations
   ros-jazzy-rqt-tf-tree
+  ros-jazzy-depth-image-proc
 )
 
 ROS_PACKAGES_EXPECTED=(
@@ -71,6 +72,7 @@ PYTHON_PACKAGES=(
   python3-matplotlib
   python3-yaml
   python3-pip
+  
 )
 
 SYSTEM_PACKAGES=(
@@ -129,7 +131,7 @@ section "Checking the system"
 
 if [ "${ID:-}" != "ubuntu" ]; then
   fail "this is ${PRETTY_NAME:-an unknown distribution}"
-  die "Task 0 requires Ubuntu ${UBUNTU_VERSION_REQUIRED}. Other distributions are not supported."
+  die "This task requires Ubuntu ${UBUNTU_VERSION_REQUIRED}. Other distributions are not supported."
 fi
 
 if [ "${VERSION_ID:-}" != "$UBUNTU_VERSION_REQUIRED" ]; then
@@ -144,23 +146,23 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if [ -f "$REPO_ROOT/eyrc-sc-evaluator" ]; then
   if [ -x "$REPO_ROOT/eyrc-sc-evaluator" ]; then
-    ok "the Task 0 evaluator is present"
+    ok "the evaluator is present"
   else
-    missing "the Task 0 evaluator is not executable; fixing it"
+    missing "the evaluator is not executable; fixing it"
     chmod +x "$REPO_ROOT/eyrc-sc-evaluator" 2>/dev/null &&
       ok "eyrc-sc-evaluator is now executable" ||
       fail "could not make eyrc-sc-evaluator executable"
   fi
 else
   fail "eyrc-sc-evaluator is missing from $REPO_ROOT"
-  info "Re-clone the repository; the evaluator is what Task 0 is submitted with."
+  info "Re-clone the repository; the evaluator is what a task is submitted with."
 fi
 
 ARCH=$(dpkg --print-architecture)
 if [ "$ARCH" != "amd64" ]; then
   missing "architecture is $ARCH, not amd64"
   info "The prebuilt binaries in ur_description are amd64 only, so the simulation will"
-  info "not run on this machine. Task 0 requires a 64-bit x86 processor."
+  info "not run on this machine. The task requires a 64-bit x86 processor."
 else
   ok "architecture $ARCH"
 fi
