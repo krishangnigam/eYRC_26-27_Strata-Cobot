@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-
 '''
 *****************************************************************************************
 *
-*                       ===============================================
-*                           StrataCobot (SC) Theme (eYRC 2026-27)
-*                       ===============================================
+*        		===============================================
+*           		        StrataCobot (SC) Theme (eYRC 2026-27)
+*        		===============================================
 *
 *  This script should be used to implement Task 1C of StrataCobot (SC) Theme (eYRC 2026-27).
 *
@@ -21,12 +20,11 @@
 # Team ID:          6494
 # Author List:      Krishang Nigam, Masum Pancholi, Harshil Jayswal, Divy Vaghasiya
 # Filename:         task1c.py
-# Functions:        pathcb, odomcb, scancb, mapcb,
-#                   wrap_angle, clamp, smooth_command,
-#                   publish_command, stop_robot,
-#                   get_scan_sector_min, get_lidar_obstacle_info,
-#                   map_to_world, get_map_obstacle_bias,
-#                   obstacle_avoidance, process_navigation
+# Functions:        wrap_angle, clamp, yaw_from_quat, ebot_nav.__init__, ebot_nav.pathcb,
+#                   ebot_nav.odomcb, ebot_nav.scancb, ebot_nav.mapcb, ebot_nav.sector_min,
+#                   ebot_nav.map_bias, ebot_nav.obstacle_avoidance, ebot_nav.publish_command,
+#                   ebot_nav.stop_robot, ebot_nav.follow_route, ebot_nav.process_navigation,
+#                   main
 # Nodes:            ebot_nav_node
 #
 # Publishing Topics  - [ /cmd_vel ]
@@ -35,74 +33,83 @@
 
 ################### IMPORT MODULES #######################
 
-import rclpy
-import sys
 import math
+import sys
 
-from rclpy.node import Node
-
+import numpy as np
+import rclpy
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry, Path, OccupancyGrid
-from rclpy.qos import (
-    QoSProfile,
-    ReliabilityPolicy,
-    DurabilityPolicy,
-    qos_profile_sensor_data
-)
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
 
 ##################### TASK CONSTANTS #######################
 
-# The route is published once when the world loads and retained
-# for late subscribers.
 path_topic = '/ebot_path'
-
 odom_topic = '/odom'
 scan_topic = '/scan'
 map_topic = '/map'
 cmd_topic = '/cmd_vel'
 
-# Velocity limits specified by the task interface.
+# What /cmd_vel accepts.
 max_linear_mps = 0.5
 max_angular_rps = 1.0
 
 
-# ---------------- Controller parameters ---------------- #
+##################### CONTROLLER TUNING #######################
 
-# Heading proportional gain.
-KP_HEADING = 1.8
+kp_heading = 1.8                        # heading proportional gain
+cruise_speed = 0.40                     # m/s when facing the waypoint
+waypoint_tolerance = 0.25               # m (scoring limit 0.5, bonus 0.3)
+final_tolerance = 0.18                  # m, tighter for the last waypoint
+rotate_only_angle = math.radians(45.0)  # turn on the spot above this heading error
+slow_radius = 0.80                      # m: slow down inside this distance of a waypoint
+min_slow_factor = 0.25
 
-# Waypoint acceptance distances.
-# The task scoring limit is 0.5 m and the bonus limit is 0.3 m.
-WAYPOINT_TOLERANCE = 0.25
-FINAL_TOLERANCE = 0.18
-
-# If the target direction is far away from the current heading,
-# rotate first rather than driving strongly forward.
-ROTATE_ONLY_ANGLE = math.radians(45.0)
-
-
-# ---------------- Obstacle parameters ---------------- #
-
-OBSTACLE_SLOW_DISTANCE = 0.90
-OBSTACLE_STOP_DISTANCE = 0.38
-
-FRONT_HALF_ANGLE = math.radians(20.0)
-SIDE_MIN_ANGLE = math.radians(20.0)
-SIDE_MAX_ANGLE = math.radians(65.0)
+# Command smoothing: largest change per 50 ms cycle.
+max_linear_change = 0.05
+max_angular_change = 0.12
 
 
-# ---------------- Map parameters ---------------- #
+##################### OBSTACLE TUNING #######################
 
-MAP_CHECK_RADIUS = 1.0
-MAP_OCCUPIED_THRESHOLD = 65
+obstacle_slow_distance = 0.90           # m: start slowing and steering
+obstacle_stop_distance = 0.38           # m: no forward motion inside this
+front_half_angle = math.radians(20.0)
+side_angles = (math.radians(20.0), math.radians(65.0))
+avoid_turn_gain = 0.65                  # rad/s at full proximity
+min_avoid_turn = 0.35                   # rad/s while stopped in front of a rock
+max_avoid_bias = 0.8
+
+map_check_radius = 1.0                  # m around the eBot considered on /map
+map_corridor_half_width = 0.85          # m either side of the heading
+map_occupied_threshold = 65
+map_bias_gain = 0.18
 
 
-# ---------------- Command smoothing ---------------- #
+##################### HELPER FUNCTIONS #######################
 
-MAX_LINEAR_CHANGE = 0.05
-MAX_ANGULAR_CHANGE = 0.12
+def wrap_angle(angle):
+    '''
+    Description:    Wraps an angle to [-pi, pi].
+    '''
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def clamp(value, low, high):
+    '''
+    Description:    Limits a value to [low, high].
+    '''
+    return max(low, min(high, value))
+
+
+def yaw_from_quat(q):
+    '''
+    Description:    Yaw of a geometry_msgs Quaternion.
+    '''
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
 ##################### CLASS DEFINITION #######################
@@ -111,1207 +118,259 @@ class ebot_nav(Node):
     '''
     ___CLASS___
 
-    Description:    Class which serves the purpose to drive the eBot along the route
-                    published on /ebot_path, through its waypoints, in order.
+    Description:    Drives the eBot along the route on /ebot_path, through its waypoints
+                    in order, steering round rocks seen on /scan and /map.
     '''
+
+    # State machine definitions
+    STATE_WAIT_FOR_DATA = 0
+    STATE_FOLLOW = 1
+    STATE_COMPLETED = 2
 
     def __init__(self):
         '''
         Description:    Initialization of class ebot_nav
         '''
-
-        # use_sim_time is set here, not on the command line, so this node runs on the
-        # simulation clock however it is started.
         super().__init__(
             'ebot_nav_node',
-            parameter_overrides=[
-                rclpy.parameter.Parameter(
-                    'use_sim_time',
-                    rclpy.Parameter.Type.BOOL,
-                    True
-                )
-            ]
-        )
+            parameter_overrides=[rclpy.parameter.Parameter(
+                'use_sim_time', rclpy.Parameter.Type.BOOL, True)])
 
+        # /ebot_path and /map are latched: published once, held for late subscribers.
+        latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
         ############ Topic SUBSCRIPTIONS ############
-
-        # /ebot_path is latched.
-        # The publisher has already sent the route before this node starts,
-        # so the subscription must request TRANSIENT_LOCAL durability.
-        route_qos = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL
-        )
-
-        # The route is received here.
-        self.path_sub = self.create_subscription(
-            Path,
-            path_topic,
-            self.pathcb,
-            route_qos
-        )
-
-        # Current robot pose.
-        self.odom_sub = self.create_subscription(
-            Odometry,
-            odom_topic,
-            self.odomcb,
-            10
-        )
-
-        # Current lidar data.
-        self.scan_sub = self.create_subscription(
-            LaserScan,
-            scan_topic,
-            self.scancb,
-            qos_profile_sensor_data
-        )
-
-        # Occupancy map is also retained.
-        self.map_sub = self.create_subscription(
-            OccupancyGrid,
-            map_topic,
-            self.mapcb,
-            route_qos
-        )
-
+        self.path_sub = self.create_subscription(Path, path_topic, self.pathcb, latched)
+        self.odom_sub = self.create_subscription(Odometry, odom_topic, self.odomcb, 10)
+        self.scan_sub = self.create_subscription(LaserScan, scan_topic, self.scancb, qos_profile_sensor_data)
+        self.map_sub = self.create_subscription(OccupancyGrid, map_topic, self.mapcb, latched)
 
         ############ Topic PUBLISHERS ############
+        self.cmd_pub = self.create_publisher(Twist, cmd_topic, 10)
 
-        # The eBot drives using linear.x and angular.z.
-        self.cmd_pub = self.create_publisher(
-            Twist,
-            cmd_topic,
-            10
-        )
-
-
-        ############ Constructor VARIABLES/OBJECTS ############
-
-        # 20 Hz control loop.
-        control_rate = 0.05
-        self.timer = self.create_timer(
-            control_rate,
-            self.process_navigation
-        )
-
-        # Received route.
-        self.route = None
-
-        # Current odometry state: (x, y, yaw).
-        self.odom = None
-
-        # Latest laser scan.
+        ############ State Variables ############
+        self.route = None                       # [(x, y), ...]
+        self.odom = None                        # (x, y, yaw)
         self.scan = None
+        self.scan_angles = None                 # beam angles, cached per scan geometry
+        self.rocks_xy = None                    # (N, 2) world coordinates of occupied cells
 
-        # Occupancy grid.
-        self.map_data = None
-
-
-        ############ ADD YOUR CODE HERE ############
-
-        # Index of the waypoint currently being followed.
-        # The route is always followed in order.
+        self.state = self.STATE_WAIT_FOR_DATA
         self.current_waypoint = 0
-
-        # Frame reported by /ebot_path.
-        self.route_frame = None
-
-        # Becomes True after the last waypoint is reached.
-        self.finished = False
-
-        # Previous command values used to avoid abrupt changes.
         self.previous_linear = 0.0
         self.previous_angular = 0.0
+        self.obstacle_active = False
 
-        # Logging state.
-        self.last_logged_waypoint = -1
-        self.last_obstacle_state = False
+        ############ Control Timer ############
+        self.control_period = 0.05               # 20 Hz
+        self.timer = self.create_timer(self.control_period, self.process_navigation)
+        self.get_logger().info('eBot navigator running on simulation clock.')
 
-        ############################################
-
-
-    ##################### ANGLE / VALUE HELPERS #######################
-
-    def wrap_angle(self, angle):
-        '''
-        Description:    Wrap an angle to the range [-pi, pi].
-
-        Args:
-            angle (float):    Angle in radians
-
-        Returns:
-            float:            Wrapped angle
-        '''
-
-        return math.atan2(
-            math.sin(angle),
-            math.cos(angle)
-        )
-
-
-    def clamp(self, value, low, high):
-        '''
-        Description:    Limit a value to a specified range.
-
-        Args:
-            value (float):    Value to limit
-            low (float):      Minimum value
-            high (float):     Maximum value
-
-        Returns:
-            float:            Limited value
-        '''
-
-        return max(
-            low,
-            min(high, value)
-        )
-
-
-    ##################### COMMAND HANDLING #######################
-
-    def smooth_command(self, desired_linear, desired_angular):
-        '''
-        Description:    Limit command changes between control cycles.
-        '''
-
-        linear_difference = (
-            desired_linear
-            - self.previous_linear
-        )
-
-        linear_difference = self.clamp(
-            linear_difference,
-            -MAX_LINEAR_CHANGE,
-            MAX_LINEAR_CHANGE
-        )
-
-        angular_difference = (
-            desired_angular
-            - self.previous_angular
-        )
-
-        angular_difference = self.clamp(
-            angular_difference,
-            -MAX_ANGULAR_CHANGE,
-            MAX_ANGULAR_CHANGE
-        )
-
-        linear = (
-            self.previous_linear
-            + linear_difference
-        )
-
-        angular = (
-            self.previous_angular
-            + angular_difference
-        )
-
-        linear = self.clamp(
-            linear,
-            -max_linear_mps,
-            max_linear_mps
-        )
-
-        angular = self.clamp(
-            angular,
-            -max_angular_rps,
-            max_angular_rps
-        )
-
-        self.previous_linear = linear
-        self.previous_angular = angular
-
-        return linear, angular
-
-
-    def publish_command(self, linear_x, angular_z):
-        '''
-        Description:    Publish a velocity command to /cmd_vel.
-        '''
-
-        linear_x = self.clamp(
-            linear_x,
-            -max_linear_mps,
-            max_linear_mps
-        )
-
-        angular_z = self.clamp(
-            angular_z,
-            -max_angular_rps,
-            max_angular_rps
-        )
-
-        linear_x, angular_z = self.smooth_command(
-            linear_x,
-            angular_z
-        )
-
-        command = Twist()
-
-        command.linear.x = linear_x
-        command.angular.z = angular_z
-
-        self.cmd_pub.publish(command)
-
-
-    def stop_robot(self):
-        '''
-        Description:    Stop the eBot by explicitly publishing zero velocity.
-        '''
-
-        self.previous_linear = 0.0
-        self.previous_angular = 0.0
-
-        command = Twist()
-
-        command.linear.x = 0.0
-        command.angular.z = 0.0
-
-        self.cmd_pub.publish(command)
-
-
-    ##################### PATH CALLBACK #######################
+    # ------------------------------------------------------------------ callbacks
 
     def pathcb(self, data):
         '''
-        Description:    Callback function for the route topic.
-                        Use this function to receive the waypoints the eBot has to drive.
+        Description:    Stores the route once; a replacement mid-run is ignored.
 
         Args:
             data (Path):    The route, as a sequence of poses
-
-        Returns:
         '''
-
-        ############ ADD YOUR CODE HERE ############
-
-        try:
-
-            # Keep the first valid route for this run.
-            if self.route is not None:
-                return
-
-            if len(data.poses) == 0:
-
-                self.get_logger().warning(
-                    'Received empty /ebot_path'
-                )
-
-                return
-
-
-            self.route = []
-
-            for waypoint in data.poses:
-
-                position = waypoint.pose.position
-
-                self.route.append(
-                    (
-                        float(position.x),
-                        float(position.y)
-                    )
-                )
-
-
-            self.current_waypoint = 0
-            self.route_frame = data.header.frame_id
-
-            self.get_logger().info(
-                f'Received route: '
-                f'{len(self.route)} waypoints '
-                f'in frame {self.route_frame}'
-            )
-
-
-        except Exception as error:
-
-            self.get_logger().error(
-                f'Path callback error: {error}'
-            )
-
-            self.route = None
-
-        ############################################
-
-
-    ##################### ODOM CALLBACK #######################
+        if self.route is not None or not data.poses:
+            return
+        self.route = [(p.pose.position.x, p.pose.position.y) for p in data.poses]
+        self.get_logger().info(f'Route: {len(self.route)} waypoints in frame {data.header.frame_id}')
 
     def odomcb(self, data):
         '''
-        Description:    Callback function for the odometry topic.
-                        Use this function to receive where the base currently is.
+        Description:    Stores the eBot's position and heading.
 
         Args:
             data (Odometry):    Pose and velocity of the base
-
-        Returns:
         '''
-
-        ############ ADD YOUR CODE HERE ############
-
-        try:
-
-            position = data.pose.pose.position
-            orientation = data.pose.pose.orientation
-
-            x = float(position.x)
-            y = float(position.y)
-
-            qx = float(orientation.x)
-            qy = float(orientation.y)
-            qz = float(orientation.z)
-            qw = float(orientation.w)
-
-            # Quaternion -> yaw.
-            yaw = math.atan2(
-                2.0 * (qw * qz + qx * qy),
-                1.0 - 2.0 * (qy * qy + qz * qz)
-            )
-
-            self.odom = (
-                x,
-                y,
-                yaw
-            )
-
-
-        except Exception as error:
-
-            self.get_logger().error(
-                f'Odometry callback error: {error}'
-            )
-
-        ############################################
-
-
-    ##################### LASER CALLBACK #######################
+        p = data.pose.pose.position
+        self.odom = (p.x, p.y, yaw_from_quat(data.pose.pose.orientation))
 
     def scancb(self, data):
         '''
-        Description:    Callback function for the lidar topic.
-                        Use this function to receive what the lidar currently sees.
+        Description:    Stores the latest lidar sweep and caches its beam angles.
 
         Args:
-            data (LaserScan):    One lidar sweep
-
-        Returns:
+            data (LaserScan):   One lidar sweep
         '''
-
-        ############ ADD YOUR CODE HERE ############
-
-        try:
-
-            self.scan = data
-
-        except Exception as error:
-
-            self.get_logger().error(
-                f'Laser callback error: {error}'
-            )
-
-        ############################################
-
-
-    ##################### MAP CALLBACK #######################
+        if self.scan_angles is None or len(self.scan_angles) != len(data.ranges):
+            self.scan_angles = data.angle_min + np.arange(len(data.ranges)) * data.angle_increment
+        self.scan = data
 
     def mapcb(self, data):
         '''
-        Description:    Callback function for the occupancy map.
-        '''
-
-        ############ ADD YOUR CODE HERE ############
-
-        try:
-
-            self.map_data = data
-
-        except Exception as error:
-
-            self.get_logger().error(
-                f'Map callback error: {error}'
-            )
-
-        ############################################
-
-
-    ##################### LASER PROCESSING #######################
-
-    def get_scan_sector_min(self, min_angle, max_angle):
-        '''
-        Description:    Find the nearest valid laser return in an angular sector.
+        Description:    Converts the occupancy grid, once, into world coordinates of its
+                        occupied cells, so the per-cycle check is a vector operation.
 
         Args:
-            min_angle (float):    Start angle in radians
-            max_angle (float):    End angle in radians
+            data (OccupancyGrid):   The rock layout
+        '''
+        info = data.info
+        grid = np.asarray(data.data, dtype=np.int16).reshape(info.height, info.width)
+        rows, cols = np.nonzero(grid >= map_occupied_threshold)
+        local = np.stack([(cols + 0.5) * info.resolution, (rows + 0.5) * info.resolution], axis=1)
+        o = info.origin
+        yaw = yaw_from_quat(o.orientation)
+        c, s = math.cos(yaw), math.sin(yaw)
+        self.rocks_xy = local @ np.array([[c, s], [-s, c]]) + (o.position.x, o.position.y)
+        self.get_logger().info(f'Map: {info.width}x{info.height} at {info.resolution} m, '
+                               f'{len(self.rocks_xy)} occupied cells')
+
+    # ------------------------------------------------------------------ sensing
+
+    def sector_min(self, low, high):
+        '''
+        Description:    Nearest valid lidar return between two beam angles.
+
+        Args:
+            low, high (float):  Sector bounds in radians (0 is straight ahead)
 
         Returns:
-            float or None:         Nearest valid range
+            float or None:      Range in metres, or None when the sector is empty
         '''
+        r = np.asarray(self.scan.ranges, dtype=np.float64)
+        ok = ((self.scan_angles >= low) & (self.scan_angles <= high) & np.isfinite(r) &
+              (r >= self.scan.range_min) & (r <= self.scan.range_max))
+        return float(r[ok].min()) if ok.any() else None
 
-        if self.scan is None:
-            return None
-
-        try:
-
-            nearest = None
-
-            for index, distance in enumerate(
-                self.scan.ranges
-            ):
-
-                angle = (
-                    self.scan.angle_min
-                    + index * self.scan.angle_increment
-                )
-
-                if angle < min_angle or angle > max_angle:
-                    continue
-
-                if not math.isfinite(distance):
-                    continue
-
-                if distance < self.scan.range_min:
-                    continue
-
-                if distance > self.scan.range_max:
-                    continue
-
-                if nearest is None or distance < nearest:
-                    nearest = distance
-
-            return nearest
-
-        except Exception:
-
-            return None
-
-
-    def get_lidar_obstacle_info(self):
+    def map_bias(self):
         '''
-        Description:    Read front, left and right lidar clearance.
-        '''
-
-        front = self.get_scan_sector_min(
-            -FRONT_HALF_ANGLE,
-            FRONT_HALF_ANGLE
-        )
-
-        left = self.get_scan_sector_min(
-            SIDE_MIN_ANGLE,
-            SIDE_MAX_ANGLE
-        )
-
-        right = self.get_scan_sector_min(
-            -SIDE_MAX_ANGLE,
-            -SIDE_MIN_ANGLE
-        )
-
-        return front, left, right
-
-
-    ##################### MAP PROCESSING #######################
-
-    def map_to_world(self, cell_x, cell_y):
-        '''
-        Description:    Convert occupancy-grid cell coordinates into world coordinates.
-        '''
-
-        if self.map_data is None:
-            return None
-
-        try:
-
-            information = self.map_data.info
-
-            resolution = float(
-                information.resolution
-            )
-
-            if resolution <= 0.0:
-                return None
-
-            origin_x = float(
-                information.origin.position.x
-            )
-
-            origin_y = float(
-                information.origin.position.y
-            )
-
-            orientation = information.origin.orientation
-
-            origin_yaw = math.atan2(
-                2.0 * (
-                    orientation.w * orientation.z
-                    + orientation.x * orientation.y
-                ),
-                1.0 - 2.0 * (
-                    orientation.y * orientation.y
-                    + orientation.z * orientation.z
-                )
-            )
-
-            local_x = (
-                (cell_x + 0.5)
-                * resolution
-            )
-
-            local_y = (
-                (cell_y + 0.5)
-                * resolution
-            )
-
-            world_x = (
-                origin_x
-                + math.cos(origin_yaw) * local_x
-                - math.sin(origin_yaw) * local_y
-            )
-
-            world_y = (
-                origin_y
-                + math.sin(origin_yaw) * local_x
-                + math.cos(origin_yaw) * local_y
-            )
-
-            return world_x, world_y
-
-        except Exception:
-
-            return None
-
-
-    def get_map_obstacle_bias(self):
-        '''
-        Description:
-            Estimate whether occupied map cells ahead of the robot
-            are concentrated more on the left or right.
+        Description:    Which side the mapped rocks ahead crowd: weighted count of occupied
+                        cells left minus right, within map_check_radius.
 
         Returns:
-            float:
-                negative -> prefer right
-                positive -> prefer left
-                zero     -> no useful information
+            float:  Positive prefers turning left, negative right, in [-1, 1]
         '''
-
-        if self.map_data is None or self.odom is None:
+        if self.rocks_xy is None or len(self.rocks_xy) == 0:
             return 0.0
+        x, y, yaw = self.odom
+        d = self.rocks_xy - (x, y)
+        dist = np.hypot(d[:, 0], d[:, 1])
+        forward = math.cos(yaw) * d[:, 0] + math.sin(yaw) * d[:, 1]
+        left = -math.sin(yaw) * d[:, 0] + math.cos(yaw) * d[:, 1]
+        keep = (dist > 0.05) & (dist <= map_check_radius) & (forward > 0.0) & \
+               (np.abs(left) <= map_corridor_half_width)
+        weight = (1.0 - dist[keep] / map_check_radius) ** 2
+        bias = weight[left[keep] > 0.0].sum() - weight[left[keep] <= 0.0].sum()
+        return clamp(float(bias), -1.0, 1.0)
 
-        try:
-
-            x, y, yaw = self.odom
-
-            info = self.map_data.info
-
-            width = int(info.width)
-            height = int(info.height)
-            resolution = float(info.resolution)
-
-            if (
-                width <= 0
-                or height <= 0
-                or resolution <= 0.0
-            ):
-                return 0.0
-
-
-            origin_orientation = info.origin.orientation
-
-            origin_yaw = math.atan2(
-                2.0 * (
-                    origin_orientation.w
-                    * origin_orientation.z
-                    + origin_orientation.x
-                    * origin_orientation.y
-                ),
-                1.0 - 2.0 * (
-                    origin_orientation.y
-                    * origin_orientation.y
-                    + origin_orientation.z
-                    * origin_orientation.z
-                )
-            )
-
-
-            # Convert robot world position into map-local coordinates.
-            dx_world = (
-                x
-                - info.origin.position.x
-            )
-
-            dy_world = (
-                y
-                - info.origin.position.y
-            )
-
-            local_x = (
-                math.cos(origin_yaw) * dx_world
-                + math.sin(origin_yaw) * dy_world
-            )
-
-            local_y = (
-                -math.sin(origin_yaw) * dx_world
-                + math.cos(origin_yaw) * dy_world
-            )
-
-
-            robot_cell_x = int(
-                math.floor(
-                    local_x / resolution
-                )
-            )
-
-            robot_cell_y = int(
-                math.floor(
-                    local_y / resolution
-                )
-            )
-
-
-            search_radius = int(
-                math.ceil(
-                    MAP_CHECK_RADIUS
-                    / resolution
-                )
-            )
-
-            left_weight = 0.0
-            right_weight = 0.0
-
-            minimum_x = max(
-                0,
-                robot_cell_x - search_radius
-            )
-
-            maximum_x = min(
-                width - 1,
-                robot_cell_x + search_radius
-            )
-
-            minimum_y = max(
-                0,
-                robot_cell_y - search_radius
-            )
-
-            maximum_y = min(
-                height - 1,
-                robot_cell_y + search_radius
-            )
-
-
-            for cell_y in range(
-                minimum_y,
-                maximum_y + 1
-            ):
-
-                row_start = (
-                    cell_y * width
-                )
-
-                for cell_x in range(
-                    minimum_x,
-                    maximum_x + 1
-                ):
-
-                    index = (
-                        row_start
-                        + cell_x
-                    )
-
-                    if (
-                        index < 0
-                        or index >= len(
-                            self.map_data.data
-                        )
-                    ):
-                        continue
-
-                    occupancy = (
-                        self.map_data.data[index]
-                    )
-
-                    if occupancy < MAP_OCCUPIED_THRESHOLD:
-                        continue
-
-                    world_position = self.map_to_world(
-                        cell_x,
-                        cell_y
-                    )
-
-                    if world_position is None:
-                        continue
-
-                    obstacle_x, obstacle_y = (
-                        world_position
-                    )
-
-                    dx = obstacle_x - x
-                    dy = obstacle_y - y
-
-                    distance = math.hypot(
-                        dx,
-                        dy
-                    )
-
-                    if distance <= 0.05:
-                        continue
-
-                    if distance > MAP_CHECK_RADIUS:
-                        continue
-
-
-                    # World coordinates -> robot coordinates.
-                    forward = (
-                        math.cos(yaw) * dx
-                        + math.sin(yaw) * dy
-                    )
-
-                    left = (
-                        -math.sin(yaw) * dx
-                        + math.cos(yaw) * dy
-                    )
-
-
-                    # Only use cells in front of the rover.
-                    if forward <= 0.0:
-                        continue
-
-                    if abs(left) > 0.85:
-                        continue
-
-
-                    weight = (
-                        1.0
-                        - distance / MAP_CHECK_RADIUS
-                    )
-
-                    weight *= weight
-
-
-                    if left > 0.0:
-                        left_weight += weight
-                    else:
-                        right_weight += weight
-
-
-            bias = (
-                left_weight
-                - right_weight
-            )
-
-            return self.clamp(
-                bias,
-                -1.0,
-                1.0
-            )
-
-        except Exception:
-
-            return 0.0
-
-
-    ##################### OBSTACLE HANDLING #######################
-
-    def obstacle_avoidance(self):
+    def obstacle_avoidance(self, front):
         '''
-        Description:
-            Calculate obstacle-related steering and speed reduction.
+        Description:    Speed scale and steering bias from the lidar and the map.
+
+        Args:
+            front (float or None):  Nearest return in the front sector
 
         Returns:
-            tuple:
-                linear_scale,
-                angular_bias,
-                obstacle_detected
+            tuple:  (linear_scale, angular_bias, obstacle_detected)
         '''
+        linear_scale, angular_bias, detected = 1.0, 0.0, False
+        if front is not None and front < obstacle_slow_distance:
+            detected = True
+            span = obstacle_slow_distance - obstacle_stop_distance
+            linear_scale = clamp((front - obstacle_stop_distance) / span, 0.0, 1.0)
+            left = self.sector_min(side_angles[0], side_angles[1])
+            right = self.sector_min(-side_angles[1], -side_angles[0])
+            left = 8.0 if left is None else left            # no return = more room
+            right = 8.0 if right is None else right
+            direction = 1.0 if left > right else -1.0
+            proximity = clamp((obstacle_slow_distance - front) / span, 0.0, 1.0)
+            angular_bias = direction * avoid_turn_gain * proximity
+        angular_bias += map_bias_gain * self.map_bias()
+        return linear_scale, clamp(angular_bias, -max_avoid_bias, max_avoid_bias), detected
 
-        front, left, right = (
-            self.get_lidar_obstacle_info()
-        )
+    # ------------------------------------------------------------------ commands
 
-        map_bias = (
-            self.get_map_obstacle_bias()
-        )
+    def publish_command(self, linear, angular):
+        '''
+        Description:    Publishes a Twist, limited to the base's range and smoothed so it
+                        changes by at most max_*_change per cycle.
+        '''
+        linear = clamp(linear, -max_linear_mps, max_linear_mps)
+        angular = clamp(angular, -max_angular_rps, max_angular_rps)
+        linear = self.previous_linear + clamp(linear - self.previous_linear, -max_linear_change, max_linear_change)
+        angular = self.previous_angular + clamp(angular - self.previous_angular, -max_angular_change, max_angular_change)
+        self.previous_linear, self.previous_angular = linear, angular
+        msg = Twist()
+        msg.linear.x = float(linear)
+        msg.angular.z = float(angular)
+        self.cmd_pub.publish(msg)
 
-        linear_scale = 1.0
-        angular_bias = 0.0
-        obstacle_detected = False
+    def stop_robot(self):
+        '''
+        Description:    Publishes zero velocity and resets the smoothing.
+        '''
+        self.previous_linear = self.previous_angular = 0.0
+        self.cmd_pub.publish(Twist())
 
+    # ------------------------------------------------------------------ control
 
-        if front is not None:
+    def follow_route(self):
+        '''
+        Description:    One control cycle towards the current waypoint.
+        '''
+        x, y, yaw = self.odom
+        tx, ty = self.route[self.current_waypoint]
+        distance = math.hypot(tx - x, ty - y)
+        last = self.current_waypoint == len(self.route) - 1
 
-            if front < OBSTACLE_SLOW_DISTANCE:
+        # Waypoint check
+        if last and distance <= final_tolerance:
+            self.stop_robot()
+            self.state = self.STATE_COMPLETED
+            self.get_logger().info(f'*** FINAL WAYPOINT REACHED ({distance:.3f} m). ROUTE COMPLETE ***')
+            return
+        if not last and distance <= waypoint_tolerance:
+            self.current_waypoint += 1
+            self.previous_linear = self.previous_angular = 0.0   # next segment starts cleanly
+            self.get_logger().info(f'Waypoint {self.current_waypoint}/{len(self.route)} reached '
+                                   f'({distance:.3f} m)')
+            return
 
-                obstacle_detected = True
+        # Heading control
+        heading_error = wrap_angle(math.atan2(ty - y, tx - x) - yaw)
+        angular = clamp(kp_heading * heading_error, -max_angular_rps, max_angular_rps)
+        linear = 0.0 if abs(heading_error) > rotate_only_angle else cruise_speed * max(0.0, math.cos(heading_error))
+        if distance < slow_radius:
+            linear *= clamp(distance / slow_radius, min_slow_factor, 1.0)
 
-                # Reduce forward velocity as the obstacle gets nearer.
-                linear_scale = self.clamp(
-                    (
-                        front
-                        - OBSTACLE_STOP_DISTANCE
-                    )
-                    /
-                    (
-                        OBSTACLE_SLOW_DISTANCE
-                        - OBSTACLE_STOP_DISTANCE
-                    ),
-                    0.0,
-                    1.0
-                )
+        # Obstacle control
+        front = self.sector_min(-front_half_angle, front_half_angle)
+        scale, turn, detected = self.obstacle_avoidance(front)
+        linear *= scale
+        angular = clamp(angular + turn, -max_angular_rps, max_angular_rps)
+        if front is not None and front <= obstacle_stop_distance:
+            linear = 0.0                                     # never drive into a close rock
+            angular = math.copysign(max(abs(angular), min_avoid_turn), angular if angular else 1.0)
 
-
-                # If one side has no valid reading,
-                # treat it as having more available room.
-                if left is None:
-                    left_clearance = 8.0
-                else:
-                    left_clearance = left
-
-                if right is None:
-                    right_clearance = 8.0
-                else:
-                    right_clearance = right
-
-
-                if left_clearance > right_clearance:
-                    turn_direction = 1.0
-                else:
-                    turn_direction = -1.0
-
-
-                # Stronger steering as the obstacle becomes closer.
-                proximity = self.clamp(
-                    (
-                        OBSTACLE_SLOW_DISTANCE
-                        - front
-                    )
-                    /
-                    (
-                        OBSTACLE_SLOW_DISTANCE
-                        - OBSTACLE_STOP_DISTANCE
-                    ),
-                    0.0,
-                    1.0
-                )
-
-
-                angular_bias = (
-                    turn_direction
-                    * 0.65
-                    * proximity
-                )
-
-
-        # Add a smaller map-based preference.
-        angular_bias += (
-            0.18 * map_bias
-        )
-
-        angular_bias = self.clamp(
-            angular_bias,
-            -0.8,
-            0.8
-        )
-
-        return (
-            linear_scale,
-            angular_bias,
-            obstacle_detected
-        )
-
-
-    ##################### NAVIGATION #######################
+        if detected and not self.obstacle_active:
+            self.get_logger().info('Obstacle ahead: avoidance active')
+        self.obstacle_active = detected
+        self.publish_command(linear, angular)
 
     def process_navigation(self):
         '''
-        Description:    Timer function used to drive the eBot along the route.
-
-        Args:
-
-        Returns:
+        Description:    Timer function: drive the route, stopping safely on any error.
         '''
-
-        ############ ADD YOUR CODE HERE ############
-
         try:
-
-            # Wait until every required feedback source has arrived.
-            if self.route is None:
-                self.stop_robot()
-                return
-
-            if self.odom is None:
-                self.stop_robot()
-                return
-
-            if self.scan is None:
-                self.stop_robot()
-                return
-
-            if len(self.route) == 0:
-                self.stop_robot()
-                return
-
-
-            # The route is already complete.
-            if self.finished:
-                self.stop_robot()
-                return
-
-
-            # Protect against an invalid waypoint index.
-            if (
-                self.current_waypoint
-                >= len(self.route)
-            ):
-
-                self.finished = True
-
-                self.stop_robot()
-
-                self.get_logger().info(
-                    'All waypoints completed. '
-                    'Robot stopped.'
-                )
-
-                return
-
-
-            # Current rover state.
-            x, y, yaw = self.odom
-
-            # Current target waypoint.
-            target_x, target_y = (
-                self.route[
-                    self.current_waypoint
-                ]
-            )
-
-
-            error_x = target_x - x
-            error_y = target_y - y
-
-            distance = math.hypot(
-                error_x,
-                error_y
-            )
-
-
-            ################ WAYPOINT CHECK ################
-
-            # Final waypoint gets a slightly tighter stopping distance.
-            if (
-                self.current_waypoint
-                == len(self.route) - 1
-            ):
-
-                if distance <= FINAL_TOLERANCE:
-
-                    self.finished = True
-
+            if self.state == self.STATE_WAIT_FOR_DATA:
+                if not (self.route and self.odom is not None and self.scan is not None):
                     self.stop_robot()
-
-                    self.get_logger().info(
-                        'Final waypoint reached. '
-                        f'distance={distance:.3f} m'
-                    )
-
                     return
-
+                self.state = self.STATE_FOLLOW
+                self.get_logger().info(f'Following route; target waypoint 1/{len(self.route)}')
+            if self.state == self.STATE_FOLLOW:
+                self.follow_route()
             else:
-
-                if distance <= WAYPOINT_TOLERANCE:
-
-                    self.get_logger().info(
-                        f'Waypoint '
-                        f'{self.current_waypoint + 1}/'
-                        f'{len(self.route)} reached '
-                        f'(distance={distance:.3f} m)'
-                    )
-
-                    self.current_waypoint += 1
-
-                    # Reset the smoothed command at a waypoint
-                    # so the next segment starts cleanly.
-                    self.previous_linear = 0.0
-                    self.previous_angular = 0.0
-
-                    return
-
-
-            ################ TARGET HEADING ################
-
-            target_heading = math.atan2(
-                error_y,
-                error_x
-            )
-
-            heading_error = self.wrap_angle(
-                target_heading - yaw
-            )
-
-
-            ################ PATH CONTROL ################
-
-            angular_cmd = (
-                KP_HEADING
-                * heading_error
-            )
-
-            angular_cmd = self.clamp(
-                angular_cmd,
-                -max_angular_rps,
-                max_angular_rps
-            )
-
-
-            # Reduce forward velocity when the robot is
-            # facing away from the target.
-            heading_factor = math.cos(
-                heading_error
-            )
-
-            heading_factor = max(
-                0.0,
-                heading_factor
-            )
-
-
-            if abs(heading_error) > ROTATE_ONLY_ANGLE:
-
-                linear_cmd = 0.0
-
-            else:
-
-                linear_cmd = (
-                    0.40
-                    * heading_factor
-                )
-
-
-            # Slow down near the waypoint.
-            if distance < 0.80:
-
-                distance_factor = self.clamp(
-                    distance / 0.80,
-                    0.25,
-                    1.0
-                )
-
-                linear_cmd *= distance_factor
-
-
-            ################ OBSTACLE CONTROL ################
-
-            (
-                obstacle_scale,
-                obstacle_turn,
-                obstacle_detected
-            ) = self.obstacle_avoidance()
-
-
-            linear_cmd *= obstacle_scale
-
-            angular_cmd += obstacle_turn
-
-
-            angular_cmd = self.clamp(
-                angular_cmd,
-                -max_angular_rps,
-                max_angular_rps
-            )
-
-
-            ################ CLOSE OBSTACLE CHECK ################
-
-            front, _, _ = (
-                self.get_lidar_obstacle_info()
-            )
-
-            if front is not None:
-
-                if front <= OBSTACLE_STOP_DISTANCE:
-
-                    # Do not continue driving forward into
-                    # a very close obstacle.
-                    linear_cmd = 0.0
-
-                    # Continue turning toward free space.
-                    if angular_cmd > 0.0:
-
-                        angular_cmd = max(
-                            angular_cmd,
-                            0.35
-                        )
-
-                    elif angular_cmd < 0.0:
-
-                        angular_cmd = min(
-                            angular_cmd,
-                            -0.35
-                        )
-
-                    else:
-
-                        angular_cmd = 0.35
-
-
-            ################ LOGGING ################
-
-            if (
-                self.current_waypoint
-                != self.last_logged_waypoint
-            ):
-
-                self.last_logged_waypoint = (
-                    self.current_waypoint
-                )
-
-                self.get_logger().info(
-                    f'Target waypoint '
-                    f'{self.current_waypoint + 1}/'
-                    f'{len(self.route)}'
-                )
-
-
-            if (
-                obstacle_detected
-                and not self.last_obstacle_state
-            ):
-
-                self.get_logger().info(
-                    'Obstacle detected; '
-                    'avoidance enabled'
-                )
-
-
-            self.last_obstacle_state = (
-                obstacle_detected
-            )
-
-
-            ################ PUBLISH ################
-
-            self.publish_command(
-                linear_cmd,
-                angular_cmd
-            )
-
-
-        except Exception as error:
-
-            # Do not allow an exception to kill the controller
-            # while leaving a previous non-zero velocity active.
-            self.get_logger().error(
-                f'Navigation error: {error}'
-            )
-
+                self.stop_robot()
+        except Exception as exc:                            # one bad cycle must not leave the base coasting
+            self.get_logger().error(f'process_navigation: {exc}')
             self.stop_robot()
-
-        ############################################
 
 
 ##################### FUNCTION DEFINITION #######################
@@ -1321,41 +380,18 @@ def main():
     Description:    Main function which creates a ROS node and spins around for the
                     ebot_nav class to perform its task
     '''
-
     rclpy.init(args=sys.argv)
-
-    # Kept in the same form as the supplied boilerplate.
-    node = rclpy.create_node(
-        'ebot_nav_process'
-    )
-
-    node.get_logger().info(
-        'Node created: eBot navigation process'
-    )
-
-    ebot_nav_class = ebot_nav()
-
+    node = ebot_nav()
     try:
-
-        rclpy.spin(
-            ebot_nav_class
-        )
-
+        rclpy.spin(node)
     except KeyboardInterrupt:
-
         pass
-
     finally:
-
-        ebot_nav_class.stop_robot()
-
-        ebot_nav_class.destroy_node()
-
+        node.stop_robot()
         node.destroy_node()
-
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
-
     main()
