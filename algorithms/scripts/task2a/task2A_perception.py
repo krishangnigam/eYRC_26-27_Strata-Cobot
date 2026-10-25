@@ -57,8 +57,8 @@ CONVEYOR_BELT_X_MIN = -2.0
 CONVEYOR_BELT_X_MAX = 1.0
 CONVEYOR_BELT_Y_MIN = -2.0
 CONVEYOR_BELT_Y_MAX = 1.0
-CONVEYOR_BELT_Z_MIN = -0.15
-CONVEYOR_BELT_Z_MAX = 0.00
+CONVEYOR_BELT_Z_MIN = -0.085
+CONVEYOR_BELT_Z_MAX = -0.045
 
 COLOR_BOUNDS = {
     'azurite_ore': (np.array([100, 180, 150], dtype=np.uint8),
@@ -415,6 +415,9 @@ class ore_perception(Node):
 
         ready = sorted([p for p in self.pending if p['hits'] >= PROMOTE_HITS], key=lambda p: (p['pos'][1], p['pos'][0]))
         for p in ready:
+            if len(self.tracked_ores) >= 4:
+                self.pending.clear()
+                break
             self.pending.remove(p)
             kind, cand = p['kind'], p['cand']
             self.kind_counts[kind] += 1
