@@ -36,8 +36,6 @@ SCRIPTS = [
     'scripts/task1a/task1a.py',
     'scripts/task1b/task1b.py',
     'scripts/task1c/task1c.py',
-    'scripts/task2a/task2A_perception.py',
-    'scripts/task2a/task2A_manipulation.py',
 ]
 
 setup(
