@@ -32,10 +32,11 @@ package_name = 'algorithms'
 #   * a script needs `#!/usr/bin/env python3` on its first line and the executable bit
 #     (`chmod +x`), or it installs fine and then refuses to start.
 SCRIPTS = [
-    # Your nodes go here, for example:
     'scripts/task1a/task1a.py',
     'scripts/task1b/task1b.py',
     'scripts/task1c/task1c.py',
+    'scripts/task2b/task2B_planning.py',
+    'scripts/task2b/task2B_navigation.py',
 ]
 
 setup(
