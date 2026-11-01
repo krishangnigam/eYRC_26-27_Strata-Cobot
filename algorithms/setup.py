@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import setup
 
 package_name = 'algorithms'
@@ -31,22 +33,28 @@ package_name = 'algorithms'
 #     and re-source after every edit;
 #   * a script needs `#!/usr/bin/env python3` on its first line and the executable bit
 #     (`chmod +x`), or it installs fine and then refuses to start.
+#
+# A launch file of your own goes in launch/ and is installed as it is: every file named
+# *.launch.py there is found by `ros2 launch algorithms <file name>` after a rebuild.
+#
 SCRIPTS = [
-    # Your nodes go here, for example:
+    'scripts/task2a/task2A_perception.py',
+    'scripts/task2a/task2A_manipulation.py',
     'scripts/task1a/task1a.py',
     'scripts/task1b/task1b.py',
     'scripts/task1c/task1c.py',
-    'scripts/task2a/task2A_perception.py',
-    'scripts/task2a/task2A_manipulation.py',
+    'scripts/task2b/task2B_planning.py',
+    'scripts/task2b/task2B_navigation.py',
 ]
 
 setup(
     name=package_name,
-    version='2.0.0',
+    version='3.0.0',
     packages=[],
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
