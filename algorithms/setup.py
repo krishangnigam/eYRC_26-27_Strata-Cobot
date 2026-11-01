@@ -38,10 +38,13 @@ package_name = 'algorithms'
 # *.launch.py there is found by `ros2 launch algorithms <file name>` after a rebuild.
 #
 SCRIPTS = [
-    # Your nodes go here, for example:
+    'scripts/task2a/task2A_perception.py',
+    'scripts/task2a/task2A_manipulation.py',
     'scripts/task1a/task1a.py',
     'scripts/task1b/task1b.py',
     'scripts/task1c/task1c.py',
+    'scripts/task2b/task2B_planning.py',
+    'scripts/task2b/task2B_navigation.py',
 ]
 
 setup(
