@@ -60,11 +60,11 @@ JOINT_CONTROLLER = 'delta_joint_controller'
 BASE_FRAME = 'base_link'
 
 # Drop poses per ore mineral type in base_link (x, y, z):
-# Computed container centres from Kepler Colony rover collision geometry
+# Container x centres from the rover geometry; y is 15 cm inside the near wall (containers span y 0.49 to 0.88)
 CONTAINER_DROP_POSES = {
-    'azurite_ore':   (-0.0281, 0.6884, 0.150),
-    'malachite_ore': (-0.3352, 0.6884, 0.150),
-    'vanadinite_ore': (-0.6266, 0.6884, 0.150),
+    'azurite_ore':   (-0.0281, 0.6400, 0.150),
+    'malachite_ore': (-0.3352, 0.6400, 0.150),
+    'vanadinite_ore': (-0.6266, 0.6400, 0.150),
 }
 
 # Height Waypoints (m in base_link)
@@ -85,6 +85,9 @@ MAX_DROP_REACH_M = 0.85              # Max XY reach for straight-line container 
 FAR_DROP_PRE_Z = DROP_DESCENT_HEIGHT_Z + 0.02  # ~0.094 m: lower approach for far containers
 FAR_DROP_SPEED_MPS = 0.08            # Slower cruise for far container approach (m/s)
 FAR_DROP_SLOW_REACH_M = 0.80         # Far approach is slowed only beyond this reach (m)
+# A far container is approached through this point, which keeps the carried ore well clear
+# of the crusher's corner (a straight line from SAFE_HOME passes within a few cm of it)
+FAR_DROP_VIA = (-0.44, 0.42, 0.26)
 
 # The ore package. It stands on the eBot's top deck beside the arm (its top face ~0.25 m above
 # base_link), weighs 0.30 kg (force ~2.94 N while held) and is 177.8 x 139.7 x 76.2 mm.
@@ -112,7 +115,7 @@ PACKAGE_DESCENT_SPEED_MPS = 0.020
 # Ore crusher hopper, from the crusher's collision mesh (map frame, opening x -1.78..-1.33,
 # y 1.65..2.10, rim z 1.08), moved into base_link (arm base at map (-0.597, 1.865, 0.8825)).
 # The drop point sits 0.16 m inside the near edge, so the whole package lands in the opening.
-HOPPER_DROP_XY = (-0.89, 0.01)                # drop point in base_link (m)
+HOPPER_DROP_XY = (-0.85, 0.01)                # drop point in base_link (m)
 HOPPER_RIM_Z = 0.21                           # rim height in base_link (m)
 HOPPER_DROP_Z = HOPPER_RIM_Z + PACKAGE_HEIGHT_M + 0.05   # tool height at release: package 5 cm over the rim
 HOPPER_PRE_DROP_Z = HOPPER_DROP_Z + 0.06      # approach height above the hopper
@@ -123,23 +126,23 @@ SIDE_WAYPOINT = (0.05, -0.45, 0.40)
 EBOT_SIDE_X = 0.25                            # the tool is on the eBot side beyond this x (m)
 
 # Motion Speeds & Acceleration Limits
-CRUISE_SPEED_MPS = 0.22                       # Main transit linear velocity (m/s); Task 3 allows 0.25
+CRUISE_SPEED_MPS = 0.248                      # Main transit linear velocity (m/s); Task 3 allows 0.25
 MIN_SERVO_SPEED_MPS = 0.008                   # Minimum speed floor during Cartesian moves
 PICK_DESCENT_SPEED_MPS = 0.035                # Slow descent to ore to avoid impact (m/s)
 DROP_DESCENT_SPEED_MPS = 0.050                # Gentle descent into container (m/s)
 POST_CONTACT_LIFT_SPEED_MPS = 0.050           # Lift speed immediately after contact (m/s)
-CAP_LINEAR_MPS = 0.24                         # Safety velocity cap (m/s): the arm drops any command over 0.25
+CAP_LINEAR_MPS = 0.248                        # Safety velocity cap (m/s): the arm drops any command over 0.25
 CAP_ANGULAR_RPS = 0.35                        # Safety angular velocity cap (rad/s)
 LINEAR_ACCEL_LIMIT = 0.60                     # Max linear acceleration (m/s^2)
 ANGULAR_ACCEL_LIMIT = 0.80                    # Max angular acceleration (rad/s^2)
 
 # Control Gains & Tolerances
 KP_POSITION = 1.30                            # Proportional gain for Cartesian position error (contact moves)
-KP_TRANSIT = 3.00                             # Faster slow-down gain for free-space stops (no contact)
+KP_TRANSIT = 4.00                             # Faster slow-down gain for free-space stops (no contact)
 KP_ORIENTATION = 1.00                         # Proportional gain for vertical tool orientation hold
 KP_JOINT = 1.50                               # Proportional gain for initial joint unfolding
-UNFOLD_MAX_RATE_RPS = 0.55                    # Joint speed cap while unfolding (rad/s); Task 3 allows 0.60
-UNFOLD_ACCEL_RPS2 = 0.60                      # Joint acceleration limit while unfolding (rad/s^2); allows 0.8
+UNFOLD_MAX_RATE_RPS = 0.58                    # Joint speed cap while unfolding (rad/s); Task 3 allows 0.60
+UNFOLD_ACCEL_RPS2 = 0.70                      # Joint acceleration limit while unfolding (rad/s^2); allows 0.8
 POSITION_TOLERANCE_M = 0.012                  # General position arrival tolerance (m)
 PRE_PICK_TOL_M = 0.004                        # Pre-pick arrival tolerance (m)
 DESCENT_TOL_M = 0.003                         # Fine descent arrival tolerance (m)
@@ -156,8 +159,9 @@ POST_CONTACT_WAIT_S = 0.30                    # Settle pause before verifying gr
 DESCENT_LOG_INTERVAL_S = 0.25                 # Log interval for descent telemetry (s)
 
 # Force Sensor Thresholds (/ur7e/end_effector/force_magnitude in N)
+FORCE_SMOOTH_S = 0.15                         # Averaging time for the back-off and release checks (s)
 CONTACT_FORCE_TRIGGER_N = 1.0                 # Stop descent when tool touches ore surface (N)
-FORCE_PROTECTIVE_LIMIT_N = 4.0                # Safety back-off threshold if contact is too hard (N)
+FORCE_PROTECTIVE_LIMIT_N = 4.0                # A touch this hard counts as contact at once (N)
 HELD_CONFIRM_FORCE_N = 0.70                   # Force indicating ore weight is supported on tool (N)
 RELEASE_CONFIRM_FORCE_N = 0.40                # Force indicating ore has detached (N)
 RELEASE_CONFIRM_WINDOW_S = 0.30               # Duration force must remain low to confirm release (s)
@@ -526,6 +530,7 @@ class arm_manipulation(Node):
         self.package_failed = False             # True once the package has run out of pick attempts
         self.lift_reported = False              # /package_lifted already published
         self.side_passed = False                # SIDE_WAYPOINT reached on the current crossing
+        self.far_via_passed = False             # FAR_DROP_VIA passed with the ore now carried
         self.exit_stage = None                  # leave_ebot_side() progress: None, 'climb' or 'side'
         self.exit_xy = None                     # where the climb out of the eBot side started
 
@@ -636,6 +641,20 @@ class arm_manipulation(Node):
         now = self.get_clock().now().nanoseconds / 1e9
         self.recent_forces.append((now, self.force_magnitude))
         self.recent_forces = [sample for sample in self.recent_forces if now - sample[0] <= 1.0]
+
+    def smooth_force(self):
+        '''
+        Description:    Tool force averaged over the last FORCE_SMOOTH_S, so that one noisy
+                        reading cannot trip a threshold on its own.
+
+        Args:
+
+        Returns:
+            force           (float):    mean force in newtons (the latest reading if none is recent)
+        '''
+        now = self.get_clock().now().nanoseconds / 1e9
+        recent = [sample[1] for sample in self.recent_forces if now - sample[0] <= FORCE_SMOOTH_S]
+        return sum(recent) / len(recent) if recent else self.force_magnitude
 
     def ebotatarmcb(self, data):
         '''
@@ -871,6 +890,8 @@ class arm_manipulation(Node):
         if new_state != old_state and old_state not in latch_states and new_state not in latch_states:
             self.latch_count = 0
 
+        if new_state == self.STATE_TRANSIT_HOME_WITH_ORE:
+            self.far_via_passed = False
         if new_state == self.STATE_APPROACH_PRE_PICK:
             self.magnet_on = False
             self.magnet_future = None
@@ -1288,9 +1309,22 @@ class arm_manipulation(Node):
         msg.velocities = cmd_velocities
         self.joint_pub.publish(msg)
 
+        if self.retreat_resume_state is None and not self.discovered:
+            self.sample_ore_transforms(now)           # the camera already sees the ores
         if max_err <= 0.04:
             self.previous_joint_rates = [0.0] * 6
             self.publish_zero_joints()
+            stable = {} if (self.discovered or self.retreat_resume_state is not None) else self.stable_ores(now)
+            if len(stable) >= DISCOVER_REQUIRED_COUNT:
+                # Every ore seen steady while unfolding: go straight to the nearest one
+                self.ore_queue = sorted(stable.values(), key=lambda item: math.hypot(item[2][0], item[2][1]))
+                self.discovered = True
+                self.get_logger().info(f'Discovered {len(self.ore_queue)} ores while unfolding: '
+                                       f'{[ore[0] for ore in self.ore_queue]}')
+                self.current_ore = self.ore_queue.pop(0)
+                self.pick_attempt_count = 0
+                self.side_passed = False
+                self.retreat_resume_state = self.STATE_APPROACH_PRE_PICK
             self.get_logger().info('Joint unfold complete. Switching to Cartesian twist controller...')
             self.change_state(self.STATE_SWITCH_TO_TWIST, now)
             self.switch_controller(TWIST_CONTROLLER)
@@ -1572,15 +1606,15 @@ class arm_manipulation(Node):
                  and (now - self.fine_enter_time) >= FINE_SETTLE_S and magnet_ready)
 
         force_limit = PACKAGE_FORCE_LIMIT_N if self.is_package() else FORCE_PROTECTIVE_LIMIT_N
-        if armed and self.force_magnitude >= force_limit:
+        if armed and self.smooth_force() >= force_limit:
+            # A hard touch is still a touch (the Task 3B force readings can spike at contact):
+            # stop here and carry on with the pick. The grip check that follows decides.
             self.publish_zero_twist()
-            self.get_logger().warn(
-                f'Force exceeded protective limit ({self.force_magnitude:.2f}N >= {force_limit}N). '
-                f'Moving up 2 cm and counting failed attempt.'
-            )
-            self.pick_attempt_count += 1
             self.contact_z = tool_z
-            self.change_state(self.STATE_DESCENT_BACKOFF, now)
+            self.get_logger().info(
+                f'Firm contact on {self.current_ore[0]}: force={self.smooth_force():.2f}N '
+                f'at z={tool_z:.4f}m (ore top z={ore_z:.4f})')
+            self.change_state(self.STATE_CONTACT_HOLD, now)
             return
 
         contact_n = PACKAGE_CONTACT_FORCE_N if self.is_package() else CONTACT_FORCE_TRIGGER_N
@@ -1754,6 +1788,10 @@ class arm_manipulation(Node):
             if self.navigate_cartesian((drop_x, drop_y, drop_z), speed, now, gain=KP_TRANSIT):
                 self.start_release(now)
             return
+        if not self.far_via_passed:
+            if self.navigate_cartesian(FAR_DROP_VIA, CRUISE_SPEED_MPS, now, through=True):
+                self.far_via_passed = True
+            return
         arrived = self.navigate_cartesian((drop_x, drop_y, pre_z), speed, now, tol=PRE_DROP_TOL_M,
                                           gain=KP_TRANSIT)
         if arrived:
@@ -1834,7 +1872,7 @@ class arm_manipulation(Node):
 
         Returns:
         '''
-        if self.force_magnitude < RELEASE_CONFIRM_FORCE_N:
+        if self.smooth_force() < RELEASE_CONFIRM_FORCE_N:
             if self.release_force_ok_start_time is None:
                 self.release_force_ok_start_time = now
             elif (now - self.release_force_ok_start_time) >= RELEASE_CONFIRM_WINDOW_S:
@@ -1862,7 +1900,7 @@ class arm_manipulation(Node):
                 if self.release_retry_count < MAX_RELEASE_RETRIES:
                     self.release_retry_count += 1
                     self.get_logger().warn(
-                        f'Release force {self.force_magnitude:.2f}N >= {RELEASE_CONFIRM_FORCE_N}N. '
+                        f'Release force {self.smooth_force():.2f}N >= {RELEASE_CONFIRM_FORCE_N}N. '
                         f'Re-sending magnet OFF ({self.release_retry_count}/{MAX_RELEASE_RETRIES})'
                     )
                     self.call_magnet(False)
@@ -1876,25 +1914,20 @@ class arm_manipulation(Node):
 
     def state_retreat_to_pre_drop(self, now):
         '''
-        Description:    Retreat Upward to Pre-Drop Height.
+        Description:    Leave the release point for the safe home waypoint.
 
         Args:
             now             (float):    current time in seconds
 
         Returns:
         '''
-        drop_x, drop_y, pre_z, _, _, is_far = self.drop_plan()
+        # The release point is above the rim, so the tool can leave for home in one straight line
+        drop_x, drop_y, _, _, _, _ = self.drop_plan()
         self.target_orientation = self.tilted_orientation(drop_x, drop_y)
-        if is_far:
-            arrived = self.navigate_cartesian(SAFE_HOME_POSE, CRUISE_SPEED_MPS, now, through=True)
-            if arrived:
-                self.target_orientation = self.vertical_orientation
-                self.change_state(self.STATE_RETURN_HOME, now)
-        else:
-            arrived = self.navigate_cartesian((drop_x, drop_y, pre_z), CRUISE_SPEED_MPS, now, through=True)
-            if arrived:
-                self.target_orientation = self.vertical_orientation
-                self.change_state(self.STATE_RETURN_HOME, now)
+        arrived = self.navigate_cartesian(SAFE_HOME_POSE, CRUISE_SPEED_MPS, now, through=True)
+        if arrived:
+            self.target_orientation = self.vertical_orientation
+            self.change_state(self.STATE_RETURN_HOME, now)
 
     def state_return_home(self, now):
         '''
