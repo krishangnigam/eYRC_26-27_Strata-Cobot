@@ -60,11 +60,11 @@ JOINT_CONTROLLER = 'delta_joint_controller'
 BASE_FRAME = 'base_link'
 
 # Drop poses per ore mineral type in base_link (x, y, z):
-# Computed container centres from Kepler Colony rover collision geometry
+# Container x centres from the rover geometry; y is 15 cm inside the near wall (containers span y 0.49 to 0.88)
 CONTAINER_DROP_POSES = {
-    'azurite_ore':   (-0.0281, 0.6884, 0.150),
-    'malachite_ore': (-0.3352, 0.6884, 0.150),
-    'vanadinite_ore': (-0.6266, 0.6884, 0.150),
+    'azurite_ore':   (-0.0281, 0.6400, 0.150),
+    'malachite_ore': (-0.3352, 0.6400, 0.150),
+    'vanadinite_ore': (-0.6266, 0.6400, 0.150),
 }
 
 # Height Waypoints (m in base_link)
@@ -112,7 +112,7 @@ PACKAGE_DESCENT_SPEED_MPS = 0.020
 # Ore crusher hopper, from the crusher's collision mesh (map frame, opening x -1.78..-1.33,
 # y 1.65..2.10, rim z 1.08), moved into base_link (arm base at map (-0.597, 1.865, 0.8825)).
 # The drop point sits 0.16 m inside the near edge, so the whole package lands in the opening.
-HOPPER_DROP_XY = (-0.89, 0.01)                # drop point in base_link (m)
+HOPPER_DROP_XY = (-0.85, 0.01)                # drop point in base_link (m)
 HOPPER_RIM_Z = 0.21                           # rim height in base_link (m)
 HOPPER_DROP_Z = HOPPER_RIM_Z + PACKAGE_HEIGHT_M + 0.05   # tool height at release: package 5 cm over the rim
 HOPPER_PRE_DROP_Z = HOPPER_DROP_Z + 0.06      # approach height above the hopper
@@ -123,23 +123,23 @@ SIDE_WAYPOINT = (0.05, -0.45, 0.40)
 EBOT_SIDE_X = 0.25                            # the tool is on the eBot side beyond this x (m)
 
 # Motion Speeds & Acceleration Limits
-CRUISE_SPEED_MPS = 0.22                       # Main transit linear velocity (m/s); Task 3 allows 0.25
+CRUISE_SPEED_MPS = 0.248                      # Main transit linear velocity (m/s); Task 3 allows 0.25
 MIN_SERVO_SPEED_MPS = 0.008                   # Minimum speed floor during Cartesian moves
 PICK_DESCENT_SPEED_MPS = 0.035                # Slow descent to ore to avoid impact (m/s)
 DROP_DESCENT_SPEED_MPS = 0.050                # Gentle descent into container (m/s)
 POST_CONTACT_LIFT_SPEED_MPS = 0.050           # Lift speed immediately after contact (m/s)
-CAP_LINEAR_MPS = 0.24                         # Safety velocity cap (m/s): the arm drops any command over 0.25
+CAP_LINEAR_MPS = 0.248                        # Safety velocity cap (m/s): the arm drops any command over 0.25
 CAP_ANGULAR_RPS = 0.35                        # Safety angular velocity cap (rad/s)
 LINEAR_ACCEL_LIMIT = 0.60                     # Max linear acceleration (m/s^2)
 ANGULAR_ACCEL_LIMIT = 0.80                    # Max angular acceleration (rad/s^2)
 
 # Control Gains & Tolerances
 KP_POSITION = 1.30                            # Proportional gain for Cartesian position error (contact moves)
-KP_TRANSIT = 3.00                             # Faster slow-down gain for free-space stops (no contact)
+KP_TRANSIT = 4.00                             # Faster slow-down gain for free-space stops (no contact)
 KP_ORIENTATION = 1.00                         # Proportional gain for vertical tool orientation hold
 KP_JOINT = 1.50                               # Proportional gain for initial joint unfolding
-UNFOLD_MAX_RATE_RPS = 0.55                    # Joint speed cap while unfolding (rad/s); Task 3 allows 0.60
-UNFOLD_ACCEL_RPS2 = 0.60                      # Joint acceleration limit while unfolding (rad/s^2); allows 0.8
+UNFOLD_MAX_RATE_RPS = 0.58                    # Joint speed cap while unfolding (rad/s); Task 3 allows 0.60
+UNFOLD_ACCEL_RPS2 = 0.70                      # Joint acceleration limit while unfolding (rad/s^2); allows 0.8
 POSITION_TOLERANCE_M = 0.012                  # General position arrival tolerance (m)
 PRE_PICK_TOL_M = 0.004                        # Pre-pick arrival tolerance (m)
 DESCENT_TOL_M = 0.003                         # Fine descent arrival tolerance (m)
@@ -1264,9 +1264,22 @@ class arm_manipulation(Node):
         msg.velocities = cmd_velocities
         self.joint_pub.publish(msg)
 
+        if self.retreat_resume_state is None and not self.discovered:
+            self.sample_ore_transforms(now)           # the camera already sees the ores
         if max_err <= 0.04:
             self.previous_joint_rates = [0.0] * 6
             self.publish_zero_joints()
+            stable = {} if (self.discovered or self.retreat_resume_state is not None) else self.stable_ores(now)
+            if len(stable) >= DISCOVER_REQUIRED_COUNT:
+                # Every ore seen steady while unfolding: go straight to the nearest one
+                self.ore_queue = sorted(stable.values(), key=lambda item: math.hypot(item[2][0], item[2][1]))
+                self.discovered = True
+                self.get_logger().info(f'Discovered {len(self.ore_queue)} ores while unfolding: '
+                                       f'{[ore[0] for ore in self.ore_queue]}')
+                self.current_ore = self.ore_queue.pop(0)
+                self.pick_attempt_count = 0
+                self.side_passed = False
+                self.retreat_resume_state = self.STATE_APPROACH_PRE_PICK
             self.get_logger().info('Joint unfold complete. Switching to Cartesian twist controller...')
             self.change_state(self.STATE_SWITCH_TO_TWIST, now)
             self.switch_controller(TWIST_CONTROLLER)
@@ -1850,25 +1863,20 @@ class arm_manipulation(Node):
 
     def state_retreat_to_pre_drop(self, now):
         '''
-        Description:    Retreat Upward to Pre-Drop Height.
+        Description:    Leave the release point for the safe home waypoint.
 
         Args:
             now             (float):    current time in seconds
 
         Returns:
         '''
-        drop_x, drop_y, pre_z, _, _, is_far = self.drop_plan()
+        # The release point is above the rim, so the tool can leave for home in one straight line
+        drop_x, drop_y, _, _, _, _ = self.drop_plan()
         self.target_orientation = self.tilted_orientation(drop_x, drop_y)
-        if is_far:
-            arrived = self.navigate_cartesian(SAFE_HOME_POSE, CRUISE_SPEED_MPS, now, through=True)
-            if arrived:
-                self.target_orientation = self.vertical_orientation
-                self.change_state(self.STATE_RETURN_HOME, now)
-        else:
-            arrived = self.navigate_cartesian((drop_x, drop_y, pre_z), CRUISE_SPEED_MPS, now, through=True)
-            if arrived:
-                self.target_orientation = self.vertical_orientation
-                self.change_state(self.STATE_RETURN_HOME, now)
+        arrived = self.navigate_cartesian(SAFE_HOME_POSE, CRUISE_SPEED_MPS, now, through=True)
+        if arrived:
+            self.target_orientation = self.vertical_orientation
+            self.change_state(self.STATE_RETURN_HOME, now)
 
     def state_return_home(self, now):
         '''
